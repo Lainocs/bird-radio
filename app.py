@@ -1445,8 +1445,7 @@ def play_radio(radio_name):
         )
 
 
-    url =
-        RADIOS[radio_name]["url"]
+    url = RADIOS[radio_name]["url"]
 
 
     print(
