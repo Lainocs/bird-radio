@@ -50,9 +50,9 @@ async def play_url_on_airplay(url):
         print(f"Appareil trouvé : {conf.name}. Connexion...")
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
 
-        print("Connecté ! Envoi de l'URL via le protocole AirPlay...")
-        # Utilisation de l'API de lecture d'URL native AirPlay de pyatv
-        await atv.airplay.play_url(url)
+        print("Connecté ! Envoi de l'URL via le service audio AirPlay...")
+        # Appel direct de play_url sur le service audio de l'appareil AirPlay
+        await atv.audio.play_url(url)
         print("Flux envoyé.")
         await atv.close()
     except Exception as e:
