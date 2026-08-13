@@ -150,7 +150,6 @@ generation_lock = threading.Lock()
 play_generation = 0
 
 # Connexion pyatv réellement utilisée pour le flux en cours.
-# On la conserve pour pouvoir arrêter exactement CE flux.
 active_stream_lock = threading.Lock()
 active_atv = None
 active_loop = None
@@ -632,6 +631,16 @@ setInterval(refreshStatus, 2000);
 """
 
 
+async def set_volume_after_start(atv, volume_level, delay=2.5):
+    """Attend quelques secondes que le flux démarre pour ajuster le volume."""
+    await asyncio.sleep(delay)
+    try:
+        await atv.audio.set_volume(volume_level)
+        print(f"Volume ajusté avec succès à {volume_level}% !")
+    except Exception as e:
+        print(f"Impossible de régler le volume pendant la lecture : {e}")
+
+
 async def play_url_on_airplay(url, generation, station_name):
     global active_atv, active_loop
 
@@ -651,17 +660,9 @@ async def play_url_on_airplay(url, generation, station_name):
         atv = await pyatv.connect(conf, loop=loop)
         print(f"[{station_name}] Connecté !")
 
-        # Force un volume fixe un peu plus élevé dès la connexion (ex: 85.0)
-        try:
-            await atv.audio.set_volume(200.0)
-            print(f"[{station_name}] Volume fixé à 200%")
-        except Exception as vol_err:
-            print(f"[{station_name}] Impossible de régler le volume : {vol_err}")
-
         print(f"[{station_name}] Envoi de l'URL via RAOP...")
 
-        # Si une autre lecture a été demandée entre-temps, cette connexion
-        # ne doit surtout pas prendre le relais.
+        # Si une autre lecture a été demandée entre-temps
         if generation != get_generation():
             print(f"[{station_name}] Lecture annulée avant le démarrage.")
             try:
@@ -676,6 +677,9 @@ async def play_url_on_airplay(url, generation, station_name):
 
         set_state("playing", station=station_name)
         print(f"[{station_name}] État -> PLAYING")
+
+        # Ajustement du volume en différé (2,5 secondes après le début du stream)
+        asyncio.create_task(set_volume_after_start(atv, 85.0, delay=2.5))
 
         await atv.stream.stream_file(url)
         print(f"[{station_name}] Flux terminé.")
@@ -713,14 +717,11 @@ async def stop_active_stream():
     print("Arrêt du flux actif sur la connexion RAOP...")
 
     try:
-        # Stop côté appareil si l'interface le permet.
         try:
             await atv.remote_control.stop()
         except Exception as e:
             print(f"Remote stop non disponible : {e}")
 
-        # Surtout, fermer la connexion qui possède le stream_file().
-        # C'est cela qui force la coroutine stream_file à se terminer.
         try:
             await asyncio.gather(*atv.close())
         except Exception as e:
@@ -736,15 +737,12 @@ async def stop_active_stream():
 async def stop_airplay():
     global active_atv, active_loop
 
-    # Priorité absolue : arrêter la connexion qui diffuse actuellement.
     with active_stream_lock:
         stream_atv = active_atv
         stream_loop = active_loop
 
     if stream_atv is not None and stream_loop is not None:
         try:
-            # Le code pyatv doit être exécuté dans la boucle asyncio qui
-            # possède la connexion RAOP.
             future = asyncio.run_coroutine_threadsafe(
                 stop_active_stream(),
                 stream_loop,
@@ -755,8 +753,6 @@ async def stop_airplay():
         except Exception as e:
             print(f"Impossible d'arrêter le flux actif : {e}")
 
-    # Fallback : si le serveur n'a pas de connexion active (par exemple
-    # après un redémarrage), on essaie quand même d'envoyer STOP à la Devialet.
     print("Aucune connexion active, recherche du Devialet pour l'arrêt...")
     loop = asyncio.get_running_loop()
     atvs = await pyatv.scan(loop=loop, hosts=[DEVIALET_IP])
