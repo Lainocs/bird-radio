@@ -1,5 +1,6 @@
 from flask import Flask, render_template_string
-import subprocess
+import asyncio
+import pyatv
 
 app = Flask(__name__)
 
@@ -10,8 +11,6 @@ RADIOS = {
 }
 
 DEVIALET_IP = "192.168.1.168"
-
-current_stream_process = None
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -39,13 +38,41 @@ HTML_PAGE = """
 </html>
 """
 
-def stop_current_stream():
-    global current_stream_process
-    if current_stream_process:
-        print("Arrêt du flux en cours...")
-        current_stream_process.terminate()
-        current_stream_process.wait()
-        current_stream_process = None
+async def play_url_on_airplay(url):
+    try:
+        print(f"Recherche de l'appareil à l'IP {DEVIALET_IP}...")
+        atvs = await pyatv.scan(loop=asyncio.get_running_loop(), hosts=[DEVIALET_IP])
+        if not atvs:
+            print("Aucun appareil trouvé à cette adresse.")
+            return
+
+        conf = atvs[0]
+        print(f"Appareil trouvé : {conf.name}. Connexion...")
+        atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
+
+        print("Connecté ! Envoi de l'URL via le protocole AirPlay...")
+        # Utilisation de l'API de lecture d'URL native AirPlay de pyatv
+        await atv.airplay.play_url(url)
+        print("Flux envoyé.")
+        await atv.close()
+    except Exception as e:
+        print(f"Erreur AirPlay : {e}")
+
+async def stop_airplay():
+    try:
+        print("Recherche de l'appareil pour l'arrêt...")
+        atvs = await pyatv.scan(loop=asyncio.get_running_loop(), hosts=[DEVIALET_IP])
+        if not atvs:
+            print("Aucun appareil trouvé à cette adresse.")
+            return
+
+        conf = atvs[0]
+        atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
+        await atv.remote_control.stop()
+        print("Lecture arrêtée.")
+        await atv.close()
+    except Exception as e:
+        print(f"Erreur lors de l'arrêt : {e}")
 
 @app.route("/")
 def index():
@@ -53,36 +80,17 @@ def index():
 
 @app.route("/play/<radio_name>", methods=["POST"])
 def play_radio(radio_name):
-    global current_stream_process
     if radio_name in RADIOS:
         url = RADIOS[radio_name]
-        print(f"Demande de lecture reçue pour : {radio_name} ({url})")
-
-        stop_current_stream()
-
-        # Utilisation de mpv avec la sortie audio dirigée vers l'appareil AirPlay
-        # mpv gère nativement le protocole raop:// pour AirPlay audio
-        cmd = [
-            "mpv",
-            f"--audio-device=raop://{DEVIALET_IP}",
-            "--no-video",
-            url
-        ]
-
-        try:
-            print(f"Lancement de mpv vers {DEVIALET_IP}...")
-            current_stream_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return f"Lecture de {radio_name} sur la Devialet", 200
-        except Exception as e:
-            print(f"Erreur lors du lancement de mpv : {e}")
-            return "Erreur technique", 500
-
+        print(f"Demande de lecture reçue pour : {radio_name}")
+        asyncio.run(play_url_on_airplay(url))
+        return f"Lecture de {radio_name} sur la Devialet", 200
     return "Radio inconnue", 400
 
 @app.route("/stop", methods=["POST"])
 def stop_audio():
     print("Demande d'arrêt reçue")
-    stop_current_stream()
+    asyncio.run(stop_airplay())
     return "Audio arrêté", 200
 
 if __name__ == "__main__":
