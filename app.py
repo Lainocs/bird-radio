@@ -1,6 +1,7 @@
 from flask import Flask, render_template_string
 import asyncio
 import pyatv
+from pyatv import exceptions
 
 app = Flask(__name__)
 
@@ -38,6 +39,7 @@ HTML_PAGE = """
 </html>
 """
 
+
 async def play_url_on_airplay(url):
     try:
         print(f"Recherche de l'appareil à l'IP {DEVIALET_IP}...")
@@ -45,18 +47,18 @@ async def play_url_on_airplay(url):
         if not atvs:
             print("Aucun appareil trouvé à cette adresse.")
             return
-
         conf = atvs[0]
         print(f"Appareil trouvé : {conf.name}. Connexion...")
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
-
-        print("Connecté ! Envoi de l'URL via le service audio AirPlay...")
-        # Appel direct de play_url sur le service audio de l'appareil AirPlay
-        await atv.audio.play_url(url)
+        print("Connecté ! Envoi de l'URL via le service de streaming AirPlay...")
+        # Le streaming d'URL se fait via atv.stream, pas atv.audio
+        # (FacadeAudio ne gère que le volume, pas la lecture)
+        await atv.stream.play_url(url)
         print("Flux envoyé.")
         await atv.close()
     except Exception as e:
         print(f"Erreur AirPlay : {e}")
+
 
 async def stop_airplay():
     try:
@@ -65,18 +67,25 @@ async def stop_airplay():
         if not atvs:
             print("Aucun appareil trouvé à cette adresse.")
             return
-
         conf = atvs[0]
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
-        await atv.remote_control.stop()
-        print("Lecture arrêtée.")
+        try:
+            await atv.remote_control.stop()
+            print("Lecture arrêtée via remote_control.")
+        except (exceptions.NotSupportedError, AttributeError) as e:
+            # Certains appareils AirPlay-only ne supportent pas remote_control.
+            # On se contente alors de fermer la connexion pour couper le flux.
+            print(f"remote_control.stop() non supporté ({e}), fermeture de la connexion.")
         await atv.close()
+        print("Connexion fermée.")
     except Exception as e:
         print(f"Erreur lors de l'arrêt : {e}")
+
 
 @app.route("/")
 def index():
     return render_template_string(HTML_PAGE)
+
 
 @app.route("/play/<radio_name>", methods=["POST"])
 def play_radio(radio_name):
@@ -87,11 +96,13 @@ def play_radio(radio_name):
         return f"Lecture de {radio_name} sur la Devialet", 200
     return "Radio inconnue", 400
 
+
 @app.route("/stop", methods=["POST"])
 def stop_audio():
     print("Demande d'arrêt reçue")
     asyncio.run(stop_airplay())
     return "Audio arrêté", 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5050)
