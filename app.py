@@ -39,7 +39,6 @@ HTML_PAGE = """
 """
 
 async def play_url_on_airplay(url):
-    # Connexion à la Devialet via son IP en AirPlay
     atv = await pyatv.connect_to_airplay(DEVIALET_IP, loop=asyncio.get_running_loop())
     await atv.audio.play_url(url)
     await atv.close()
@@ -53,7 +52,7 @@ async def stop_airplay():
         pass
 
 @app.route("/")
-index def index():
+def index():
     return render_template_string(HTML_PAGE)
 
 @app.route("/play/<radio_name>", methods=["POST"])
