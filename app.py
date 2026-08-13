@@ -650,6 +650,14 @@ async def play_url_on_airplay(url, generation, station_name):
 
         atv = await pyatv.connect(conf, loop=loop)
         print(f"[{station_name}] Connecté !")
+
+        # Force un volume fixe un peu plus élevé dès la connexion (ex: 85.0)
+        try:
+            await atv.audio.set_volume(85.0)
+            print(f"[{station_name}] Volume fixé à 85%")
+        except Exception as vol_err:
+            print(f"[{station_name}] Impossible de régler le volume : {vol_err}")
+
         print(f"[{station_name}] Envoi de l'URL via RAOP...")
 
         # Si une autre lecture a été demandée entre-temps, cette connexion
