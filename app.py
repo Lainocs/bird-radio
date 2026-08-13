@@ -1480,8 +1480,7 @@ async def play_url_on_airplay(
             )
 
 
-        conf =
-            atvs[0]
+        conf = atvs[0]
 
 
         print(
