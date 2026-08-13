@@ -149,6 +149,12 @@ current_state = {
 generation_lock = threading.Lock()
 play_generation = 0
 
+# Connexion pyatv réellement utilisée pour le flux en cours.
+# On la conserve pour pouvoir arrêter exactement CE flux.
+active_stream_lock = threading.Lock()
+active_atv = None
+active_loop = None
+
 
 def get_new_generation():
     global play_generation
@@ -627,10 +633,13 @@ setInterval(refreshStatus, 2000);
 
 
 async def play_url_on_airplay(url, generation, station_name):
+    global active_atv, active_loop
+
     atv = None
+    loop = asyncio.get_running_loop()
+
     try:
         print(f"[{station_name}] Recherche du Devialet à l'IP {DEVIALET_IP}...")
-        loop = asyncio.get_running_loop()
         atvs = await pyatv.scan(loop=loop, hosts=[DEVIALET_IP])
 
         if not atvs:
@@ -643,12 +652,29 @@ async def play_url_on_airplay(url, generation, station_name):
         print(f"[{station_name}] Connecté !")
         print(f"[{station_name}] Envoi de l'URL via RAOP...")
 
-        if generation == get_generation():
-            set_state("playing", station=station_name)
-            print(f"[{station_name}] État -> PLAYING")
+        # Si une autre lecture a été demandée entre-temps, cette connexion
+        # ne doit surtout pas prendre le relais.
+        if generation != get_generation():
+            print(f"[{station_name}] Lecture annulée avant le démarrage.")
+            try:
+                await asyncio.gather(*atv.close())
+            except Exception:
+                pass
+            return
+
+        with active_stream_lock:
+            active_atv = atv
+            active_loop = loop
+
+        set_state("playing", station=station_name)
+        print(f"[{station_name}] État -> PLAYING")
 
         await atv.stream.stream_file(url)
         print(f"[{station_name}] Flux terminé.")
+
+    except asyncio.CancelledError:
+        print(f"[{station_name}] Flux annulé.")
+        raise
 
     except Exception as e:
         print(f"[{station_name}] Erreur AirPlay : {e}")
@@ -656,15 +682,74 @@ async def play_url_on_airplay(url, generation, station_name):
             set_state("error", station=station_name, message=str(e))
 
     finally:
+        with active_stream_lock:
+            if active_atv is atv:
+                active_atv = None
+                active_loop = None
+
         if atv is not None:
             try:
-                atv.close()
+                await asyncio.gather(*atv.close())
             except Exception:
                 pass
 
 
+async def stop_active_stream():
+    """Arrête le flux sur la connexion pyatv qui l'envoie réellement."""
+    with active_stream_lock:
+        atv = active_atv
+
+    if atv is None:
+        return False
+
+    print("Arrêt du flux actif sur la connexion RAOP...")
+
+    try:
+        # Stop côté appareil si l'interface le permet.
+        try:
+            await atv.remote_control.stop()
+        except Exception as e:
+            print(f"Remote stop non disponible : {e}")
+
+        # Surtout, fermer la connexion qui possède le stream_file().
+        # C'est cela qui force la coroutine stream_file à se terminer.
+        try:
+            await asyncio.gather(*atv.close())
+        except Exception as e:
+            print(f"Erreur lors de la fermeture du flux : {e}")
+
+        return True
+
+    except Exception as e:
+        print(f"Erreur lors de l'arrêt du flux actif : {e}")
+        return False
+
+
 async def stop_airplay():
-    print("Recherche du Devialet pour l'arrêt...")
+    global active_atv, active_loop
+
+    # Priorité absolue : arrêter la connexion qui diffuse actuellement.
+    with active_stream_lock:
+        stream_atv = active_atv
+        stream_loop = active_loop
+
+    if stream_atv is not None and stream_loop is not None:
+        try:
+            # Le code pyatv doit être exécuté dans la boucle asyncio qui
+            # possède la connexion RAOP.
+            future = asyncio.run_coroutine_threadsafe(
+                stop_active_stream(),
+                stream_loop,
+            )
+            future.result(timeout=10)
+            print("Arrêt de la diffusion active demandé.")
+            return
+        except Exception as e:
+            print(f"Impossible d'arrêter le flux actif : {e}")
+
+    # Fallback : si le serveur n'a pas de connexion active (par exemple
+    # après un redémarrage), on essaie quand même d'envoyer STOP à la Devialet.
+    print("Aucune connexion active, recherche du Devialet pour l'arrêt...")
     loop = asyncio.get_running_loop()
     atvs = await pyatv.scan(loop=loop, hosts=[DEVIALET_IP])
 
@@ -679,14 +764,14 @@ async def stop_airplay():
     try:
         try:
             await atv.remote_control.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Remote stop non disponible : {e}")
         print("Arrêt de la diffusion demandé.")
     except Exception as e:
         print(f"Erreur lors de l'arrêt airplay : {e}")
     finally:
         try:
-            atv.close()
+            await asyncio.gather(*atv.close())
         except Exception:
             pass
 
