@@ -653,8 +653,8 @@ async def play_url_on_airplay(url, generation, station_name):
 
         # Force un volume fixe un peu plus élevé dès la connexion (ex: 85.0)
         try:
-            await atv.audio.set_volume(85.0)
-            print(f"[{station_name}] Volume fixé à 85%")
+            await atv.audio.set_volume(100.0)
+            print(f"[{station_name}] Volume fixé à 100%")
         except Exception as vol_err:
             print(f"[{station_name}] Impossible de régler le volume : {vol_err}")
 
