@@ -11,7 +11,6 @@ RADIOS = {
 
 DEVIALET_IP = "192.168.1.168"
 
-# Variable globale pour stocker le processus ffmpeg en cours
 current_stream_process = None
 
 HTML_PAGE = """
@@ -59,23 +58,23 @@ def play_radio(radio_name):
         url = RADIOS[radio_name]
         print(f"Demande de lecture reçue pour : {radio_name} ({url})")
 
-        # Stopper tout flux précédent
         stop_current_stream()
 
-        # Utilisation de ffmpeg pour streamer directement vers l'AirPlay de la Devialet
-        # Commande ffmpeg pour décoder le flux web et l'envoyer au protocole raop (AirPlay audio)
+        # Utilisation de mpv avec la sortie audio dirigée vers l'appareil AirPlay
+        # mpv gère nativement le protocole raop:// pour AirPlay audio
         cmd = [
-            "ffmpeg", "-re", "-i", url,
-            "-f", "s16le", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
-            f"raop://{DEVIALET_IP}"
+            "mpv",
+            f"--audio-device=raop://{DEVIALET_IP}",
+            "--no-video",
+            url
         ]
 
         try:
-            print(f"Lancement de ffmpeg vers {DEVIALET_IP}...")
+            print(f"Lancement de mpv vers {DEVIALET_IP}...")
             current_stream_process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"Lecture de {radio_name} sur la Devialet", 200
         except Exception as e:
-            print(f"Erreur lors du lancement de ffmpeg : {e}")
+            print(f"Erreur lors du lancement de mpv : {e}")
             return "Erreur technique", 500
 
     return "Radio inconnue", 400
