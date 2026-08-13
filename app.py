@@ -41,19 +41,18 @@ HTML_PAGE = """
 async def play_url_on_airplay(url):
     try:
         print(f"Recherche de l'appareil à l'IP {DEVIALET_IP}...")
-        # On scanne spécifiquement l'IP de la Devialet
         atvs = await pyatv.scan(loop=asyncio.get_running_loop(), hosts=[DEVIALET_IP])
         if not atvs:
             print("Aucun appareil trouvé à cette adresse.")
             return
 
-        conf = atvsets = atvs[0]
+        conf = atvs[0]
         print(f"Appareil trouvé : {conf.name}. Connexion...")
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
 
-        print("Connecté ! Envoi de l'URL...")
-        await atv.audio.play_url(url)
-        print("URL envoyée.")
+        print("Connecté ! Lancement du flux audio...")
+        await atv.audio.stream_file(url)
+        print("Flux audio démarré.")
         await atv.close()
     except Exception as e:
         print(f"Erreur AirPlay : {e}")
@@ -66,7 +65,7 @@ async def stop_airplay():
             print("Aucun appareil trouvé à cette adresse.")
             return
 
-        conf = atvs
+        conf = atvs[0]
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
         await atv.remote_control.stop()
         print("Lecture arrêtée.")
