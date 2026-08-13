@@ -12,7 +12,12 @@ app = Flask(__name__)
 # Catalogue des stations
 # ---------------------------------------------------------------------------
 
-CATEGORIES = ["Radio France", "Généralistes", "Musique", "Jazz & Lounge"]
+CATEGORIES = [
+    "Radio France",
+    "Généralistes",
+    "Musique",
+    "Jazz & Lounge",
+]
 
 RADIOS = {
     # --- Radio France ---
@@ -147,7 +152,7 @@ DEVIALET_IP = "192.168.1.168"
 
 
 # ---------------------------------------------------------------------------
-# Etat courant
+# Etat global
 # ---------------------------------------------------------------------------
 
 state_lock = threading.Lock()
@@ -158,6 +163,28 @@ current_state = {
     "message": "",
     "updated_at": time.time(),
 }
+
+# Numéro de génération de lecture.
+#
+# Chaque nouvelle station augmente ce numéro.
+# Cela permet d'ignorer les erreurs provenant d'un ancien stream
+# après qu'une nouvelle station a déjà été lancée.
+play_generation = 0
+
+generation_lock = threading.Lock()
+
+
+def get_new_generation():
+    global play_generation
+
+    with generation_lock:
+        play_generation += 1
+        return play_generation
+
+
+def get_generation():
+    with generation_lock:
+        return play_generation
 
 
 def set_state(status, station=None, message=""):
@@ -175,427 +202,552 @@ def set_state(status, station=None, message=""):
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
+
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
 <title>Radio Oiseau</title>
 
 <style>
 
 :root {
-  --bg: #0f1115;
-  --card: #181b22;
-  --card-hover: #1f232c;
-  --text: #f2f2f2;
-  --muted: #8b8f98;
-  --accent: #4CAF50;
-  --danger: #f44336;
-  --border: #262b35;
+    --bg: #0f1115;
+    --card: #181b22;
+    --card-hover: #1f232c;
+    --text: #f2f2f2;
+    --muted: #8b8f98;
+    --accent: #4CAF50;
+    --danger: #f44336;
+    --border: #262b35;
 }
 
 * {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 body {
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
 
-  background:
-    radial-gradient(
-      circle at top,
-      #171a21 0%,
-      #0b0d11 100%
-    );
+    font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        sans-serif;
 
-  color: var(--text);
-  margin: 0;
-  padding: 32px 18px 100px;
-  min-height: 100vh;
+    background:
+        radial-gradient(
+            circle at top,
+            #171a21 0%,
+            #0b0d11 100%
+        );
+
+    color: var(--text);
+
+    margin: 0;
+
+    padding:
+        32px
+        18px
+        100px;
+
+    min-height: 100vh;
 }
 
 .wrap {
-  max-width: 480px;
-  margin: 0 auto;
+
+    max-width: 480px;
+
+    margin: 0 auto;
 }
 
 h1 {
-  text-align: center;
-  font-size: 26px;
-  margin-bottom: 4px;
+
+    text-align: center;
+
+    font-size: 26px;
+
+    margin-bottom: 4px;
 }
 
 .subtitle {
-  text-align: center;
-  color: var(--muted);
-  font-size: 14px;
-  margin-bottom: 22px;
+
+    text-align: center;
+
+    color: var(--muted);
+
+    font-size: 14px;
+
+    margin-bottom: 22px;
 }
 
 
-/* ------------------------------------------------------------------
-   Now playing
-------------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Now Playing
+---------------------------------------------------------------- */
 
 .now-playing {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 20px 22px;
-  margin-bottom: 20px;
 
-  display: flex;
-  align-items: center;
-  gap: 16px;
+    background: var(--card);
 
-  transition: border-color 0.3s ease;
+    border:
+        1px solid
+        var(--border);
 
-  position: sticky;
-  top: 12px;
+    border-radius: 18px;
 
-  z-index: 10;
+    padding:
+        20px
+        22px;
 
-  backdrop-filter: blur(6px);
+    margin-bottom: 20px;
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 16px;
+
+    transition:
+        border-color
+        0.3s ease;
+
+    position: sticky;
+
+    top: 12px;
+
+    z-index: 10;
+
+    backdrop-filter: blur(6px);
 }
 
 .now-playing.playing {
-  border-color: var(--accent);
+
+    border-color:
+        var(--accent);
 }
 
 .now-playing.error {
-  border-color: var(--danger);
+
+    border-color:
+        var(--danger);
 }
 
 .np-icon {
-  width: 52px;
-  height: 52px;
 
-  border-radius: 14px;
+    width: 52px;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    height: 52px;
 
-  font-size: 26px;
+    border-radius: 14px;
 
-  background: #22262f;
+    display: flex;
 
-  flex-shrink: 0;
+    align-items: center;
+
+    justify-content: center;
+
+    font-size: 26px;
+
+    background: #22262f;
+
+    flex-shrink: 0;
 }
 
 .np-info {
-  flex: 1;
-  min-width: 0;
+
+    flex: 1;
+
+    min-width: 0;
 }
 
 .np-status {
-  font-size: 12px;
 
-  text-transform: uppercase;
+    font-size: 12px;
 
-  letter-spacing: 0.06em;
+    text-transform: uppercase;
 
-  color: var(--muted);
+    letter-spacing: 0.06em;
 
-  margin-bottom: 2px;
+    color: var(--muted);
 
-  display: flex;
-  align-items: center;
+    margin-bottom: 2px;
 
-  gap: 6px;
+    display: flex;
+
+    align-items: center;
+
+    gap: 6px;
 }
 
 .np-title {
-  font-size: 17px;
 
-  font-weight: 600;
+    font-size: 17px;
 
-  white-space: nowrap;
+    font-weight: 600;
 
-  overflow: hidden;
+    white-space: nowrap;
 
-  text-overflow: ellipsis;
+    overflow: hidden;
+
+    text-overflow: ellipsis;
 }
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Status dot
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 .dot {
-  width: 8px;
-  height: 8px;
 
-  border-radius: 50%;
+    width: 8px;
 
-  background: var(--muted);
+    height: 8px;
 
-  display: inline-block;
+    border-radius: 50%;
+
+    background:
+        var(--muted);
+
+    display: inline-block;
 }
 
 .dot.playing {
-  background: var(--accent);
 
-  animation:
-    pulse 1.4s infinite ease-in-out;
+    background:
+        var(--accent);
+
+    animation:
+        pulse
+        1.4s
+        infinite
+        ease-in-out;
 }
 
 .dot.connecting {
-  background: #e9c46a;
 
-  animation:
-    pulse 0.9s infinite ease-in-out;
+    background: #e9c46a;
+
+    animation:
+        pulse
+        0.9s
+        infinite
+        ease-in-out;
 }
 
 .dot.error {
-  background: var(--danger);
+
+    background:
+        var(--danger);
 }
 
 @keyframes pulse {
 
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
+    0%, 100% {
 
-  50% {
-    opacity: 0.4;
-    transform: scale(0.75);
-  }
+        opacity: 1;
 
+        transform:
+            scale(1);
+    }
+
+    50% {
+
+        opacity: 0.4;
+
+        transform:
+            scale(0.75);
+    }
 }
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Search
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 .search-box {
-  width: 100%;
 
-  padding: 13px 16px;
+    width: 100%;
 
-  border-radius: 12px;
+    padding:
+        13px
+        16px;
 
-  border: 1px solid var(--border);
+    border-radius: 12px;
 
-  background: var(--card);
+    border:
+        1px solid
+        var(--border);
 
-  color: var(--text);
+    background:
+        var(--card);
 
-  font-size: 15px;
+    color:
+        var(--text);
 
-  margin-bottom: 18px;
+    font-size: 15px;
 
-  outline: none;
+    margin-bottom: 18px;
+
+    outline: none;
 }
 
 .search-box::placeholder {
-  color: var(--muted);
+
+    color:
+        var(--muted);
 }
 
 .search-box:focus {
-  border-color: var(--accent);
+
+    border-color:
+        var(--accent);
 }
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Categories
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 .category {
-  margin-bottom: 22px;
+
+    margin-bottom: 22px;
 }
 
 .category-title {
-  font-size: 12px;
 
-  text-transform: uppercase;
+    font-size: 12px;
 
-  letter-spacing: 0.08em;
+    text-transform: uppercase;
 
-  color: var(--muted);
+    letter-spacing: 0.08em;
 
-  margin:
-    0 0 10px 4px;
+    color:
+        var(--muted);
+
+    margin:
+        0
+        0
+        10px
+        4px;
 }
 
 .stations {
-  display: flex;
-  flex-direction: column;
 
-  gap: 10px;
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 10px;
 }
 
 
-/* ------------------------------------------------------------------
-   Station buttons
-------------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Stations
+---------------------------------------------------------------- */
 
 .station-btn {
-  display: flex;
-  align-items: center;
 
-  gap: 14px;
+    display: flex;
 
-  background: var(--card);
+    align-items: center;
 
-  border: 1px solid var(--border);
+    gap: 14px;
 
-  border-radius: 14px;
+    background:
+        var(--card);
 
-  padding: 14px 16px;
+    border:
+        1px solid
+        var(--border);
 
-  cursor: pointer;
+    border-radius: 14px;
 
-  color: var(--text);
+    padding:
+        14px
+        16px;
 
-  font-size: 15px;
+    cursor: pointer;
 
-  font-weight: 500;
+    color:
+        var(--text);
 
-  text-align: left;
+    font-size: 15px;
 
-  transition:
-    all 0.15s ease;
+    font-weight: 500;
+
+    text-align: left;
+
+    transition:
+        all
+        0.15s
+        ease;
 }
 
 .station-btn:hover {
-  background: var(--card-hover);
 
-  transform:
-    translateY(-1px);
+    background:
+        var(--card-hover);
+
+    transform:
+        translateY(-1px);
 }
 
 .station-btn:active {
-  transform:
-    translateY(0px)
-    scale(0.99);
+
+    transform:
+        translateY(0)
+        scale(0.99);
 }
 
 .station-btn.active {
-  border-color: var(--accent);
 
-  background:
-    linear-gradient(
-      90deg,
-      rgba(76,175,80,0.12),
-      transparent
-    );
+    border-color:
+        var(--accent);
+
+    background:
+        linear-gradient(
+            90deg,
+            rgba(76,175,80,0.12),
+            transparent
+        );
 }
 
 .station-emoji {
-  width: 36px;
-  height: 36px;
 
-  border-radius: 10px;
+    width: 36px;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    height: 36px;
 
-  font-size: 18px;
+    border-radius: 10px;
 
-  background: #22262f;
+    display: flex;
 
-  flex-shrink: 0;
+    align-items: center;
+
+    justify-content: center;
+
+    font-size: 18px;
+
+    background:
+        #22262f;
+
+    flex-shrink: 0;
 }
 
 .station-check {
-  margin-left: auto;
 
-  color: var(--accent);
+    margin-left: auto;
 
-  font-size: 18px;
+    color:
+        var(--accent);
 
-  opacity: 0;
+    font-size: 18px;
+
+    opacity: 0;
 }
 
-.station-btn.active .station-check {
-  opacity: 1;
+.station-btn.active
+.station-check {
+
+    opacity: 1;
 }
 
 
-/* ------------------------------------------------------------------
-   Stop bar
-------------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Stop button
+---------------------------------------------------------------- */
 
 .stop-bar {
-  position: fixed;
 
-  bottom: 0;
-  left: 0;
-  right: 0;
+    position: fixed;
 
-  padding:
-    16px
-    18px
-    calc(16px + env(safe-area-inset-bottom));
+    bottom: 0;
 
-  background:
-    linear-gradient(
-      0deg,
-      #0b0d11 60%,
-      transparent
-    );
+    left: 0;
+
+    right: 0;
+
+    padding:
+        16px
+        18px
+        calc(
+            16px +
+            env(
+                safe-area-inset-bottom
+            )
+        );
+
+    background:
+        linear-gradient(
+            0deg,
+            #0b0d11 60%,
+            transparent
+        );
 }
 
 .stop-btn {
-  max-width: 480px;
 
-  margin: 0 auto;
+    max-width: 480px;
 
-  width: 100%;
+    margin: 0 auto;
 
-  padding: 15px;
+    width: 100%;
 
-  border: none;
+    padding: 15px;
 
-  border-radius: 14px;
+    border: none;
 
-  background: var(--danger);
+    border-radius: 14px;
 
-  color: white;
+    background:
+        var(--danger);
 
-  font-size: 16px;
+    color: white;
 
-  font-weight: 600;
+    font-size: 16px;
 
-  cursor: pointer;
+    font-weight: 600;
 
-  display: block;
+    cursor: pointer;
 
-  transition:
-    filter 0.15s ease;
+    display: block;
 }
 
 .stop-btn:hover {
-  filter: brightness(1.1);
+
+    filter:
+        brightness(1.1);
 }
 
 .stop-btn:disabled,
 .station-btn:disabled {
-  opacity: 0.5;
 
-  cursor: not-allowed;
+    opacity: 0.5;
+
+    cursor:
+        not-allowed;
 }
 
 .no-results {
-  text-align: center;
 
-  color: var(--muted);
+    text-align: center;
 
-  padding: 20px;
+    color:
+        var(--muted);
 
-  font-size: 14px;
+    padding: 20px;
+
+    font-size: 14px;
 }
 
 </style>
+
 </head>
 
 
@@ -603,617 +755,717 @@ h1 {
 
 <div class="wrap">
 
-  <h1>🦜 Radio Oiseau</h1>
+    <h1>
+        🦜 Radio Oiseau
+    </h1>
 
-  <div class="subtitle">
-    Contrôle de la Devialet
-  </div>
+    <div class="subtitle">
+        Contrôle de la Devialet
+    </div>
 
-
-  <div
-    class="now-playing"
-    id="nowPlaying"
-  >
 
     <div
-      class="np-icon"
-      id="npIcon"
+        class="now-playing"
+        id="nowPlaying"
     >
-      🔇
-    </div>
 
-
-    <div class="np-info">
-
-      <div class="np-status">
-
-        <span
-          class="dot"
-          id="npDot"
-        ></span>
-
-        <span
-          id="npStatusText"
+        <div
+            class="np-icon"
+            id="npIcon"
         >
-          Arrêté
-        </span>
-
-      </div>
+            🔇
+        </div>
 
 
-      <div
-        class="np-title"
-        id="npTitle"
-      >
-        Aucune diffusion
-      </div>
+        <div class="np-info">
+
+            <div class="np-status">
+
+                <span
+                    class="dot"
+                    id="npDot"
+                ></span>
+
+                <span
+                    id="npStatusText"
+                >
+                    Arrêté
+                </span>
+
+            </div>
+
+
+            <div
+                class="np-title"
+                id="npTitle"
+            >
+                Aucune diffusion
+            </div>
+
+        </div>
 
     </div>
 
-  </div>
+
+    <input
+        class="search-box"
+        id="searchBox"
+        type="text"
+        placeholder="Rechercher une station..."
+        oninput="filterStations()"
+    >
 
 
-  <input
-    class="search-box"
-    id="searchBox"
-    type="text"
-    placeholder="Rechercher une station..."
-    oninput="filterStations()"
-  >
-
-
-  <div id="categoriesContainer"></div>
+    <div
+        id="categoriesContainer"
+    ></div>
 
 </div>
 
 
 <div class="stop-bar">
 
-  <button
-    class="stop-btn"
-    id="stopBtn"
-    onclick="stopRadio()"
-  >
-    Couper le son 🔇
-  </button>
+    <button
+        class="stop-btn"
+        id="stopBtn"
+        onclick="stopRadio()"
+    >
+        Couper le son 🔇
+    </button>
 
 </div>
 
 
 <script>
 
-const RADIOS = __RADIOS_JSON__;
+const RADIOS =
+    __RADIOS_JSON__;
 
-const CATEGORIES = __CATEGORIES_JSON__;
+const CATEGORIES =
+    __CATEGORIES_JSON__;
 
 const container =
-  document.getElementById(
-    'categoriesContainer'
-  );
+    document.getElementById(
+        'categoriesContainer'
+    );
 
 
-/* ------------------------------------------------------------------
-   Stations
-------------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Création des stations
+---------------------------------------------------------------- */
 
 CATEGORIES.forEach(cat => {
 
-  const entries =
-    Object.entries(RADIOS)
-      .filter(
-        ([, r]) =>
-          r.category === cat
-      );
+    const entries =
+        Object.entries(RADIOS)
+            .filter(
+                ([, r]) =>
+                    r.category === cat
+            );
 
-  if (entries.length === 0)
-    return;
-
-
-  const catDiv =
-    document.createElement('div');
-
-  catDiv.className =
-    'category';
-
-  catDiv.dataset.category =
-    cat;
+    if (
+        entries.length === 0
+    ) {
+        return;
+    }
 
 
-  const title =
-    document.createElement('div');
+    const catDiv =
+        document.createElement(
+            'div'
+        );
 
-  title.className =
-    'category-title';
-
-  title.textContent =
-    cat;
-
-  catDiv.appendChild(title);
+    catDiv.className =
+        'category';
 
 
-  const stationsDiv =
-    document.createElement('div');
+    const title =
+        document.createElement(
+            'div'
+        );
 
-  stationsDiv.className =
-    'stations';
+    title.className =
+        'category-title';
 
-
-  entries.forEach(([key, r]) => {
-
-    const btn =
-      document.createElement(
-        'button'
-      );
-
-    btn.className =
-      'station-btn';
-
-    btn.id =
-      'btn-' + key;
-
-    btn.dataset.name =
-      r.name.toLowerCase();
-
-    btn.onclick =
-      () => playRadio(key);
-
-    btn.innerHTML = `
-      <div class="station-emoji">
-        ${r.emoji}
-      </div>
-
-      <span>
-        ${r.name}
-      </span>
-
-      <span class="station-check">
-        ✓
-      </span>
-    `;
-
-    stationsDiv.appendChild(btn);
-
-  });
+    title.textContent =
+        cat;
 
 
-  catDiv.appendChild(stationsDiv);
+    catDiv.appendChild(
+        title
+    );
 
-  container.appendChild(catDiv);
+
+    const stationsDiv =
+        document.createElement(
+            'div'
+        );
+
+    stationsDiv.className =
+        'stations';
+
+
+    entries.forEach(
+        ([key, r]) => {
+
+            const btn =
+                document.createElement(
+                    'button'
+                );
+
+            btn.className =
+                'station-btn';
+
+            btn.id =
+                'btn-' + key;
+
+            btn.dataset.name =
+                r.name.toLowerCase();
+
+            btn.onclick =
+                () => playRadio(key);
+
+
+            btn.innerHTML = `
+                <div
+                    class="station-emoji"
+                >
+                    ${r.emoji}
+                </div>
+
+                <span>
+                    ${r.name}
+                </span>
+
+                <span
+                    class="station-check"
+                >
+                    ✓
+                </span>
+            `;
+
+
+            stationsDiv.appendChild(
+                btn
+            );
+
+        }
+    );
+
+
+    catDiv.appendChild(
+        stationsDiv
+    );
+
+
+    container.appendChild(
+        catDiv
+    );
 
 });
 
 
 const noResultsEl =
-  document.createElement('div');
+    document.createElement(
+        'div'
+    );
 
 noResultsEl.className =
-  'no-results';
+    'no-results';
 
 noResultsEl.textContent =
-  'Aucune station trouvée';
+    'Aucune station trouvée';
 
 noResultsEl.style.display =
-  'none';
+    'none';
 
-container.appendChild(noResultsEl);
+container.appendChild(
+    noResultsEl
+);
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Recherche
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 function filterStations() {
 
-  const q =
-    document
-      .getElementById('searchBox')
-      .value
-      .trim()
-      .toLowerCase();
+    const q =
+        document
+            .getElementById(
+                'searchBox'
+            )
+            .value
+            .trim()
+            .toLowerCase();
 
 
-  let anyVisible = false;
-
-
-  document
-    .querySelectorAll('.category')
-    .forEach(catDiv => {
-
-      let catHasVisible =
+    let anyVisible =
         false;
 
 
-      catDiv
+    document
         .querySelectorAll(
-          '.station-btn'
+            '.category'
         )
-        .forEach(btn => {
+        .forEach(
+            catDiv => {
 
-          const match =
-            btn.dataset.name
-              .includes(q);
-
-
-          btn.style.display =
-            match
-              ? 'flex'
-              : 'none';
+                let
+                    catHasVisible =
+                    false;
 
 
-          if (match)
-            catHasVisible = true;
+                catDiv
+                    .querySelectorAll(
+                        '.station-btn'
+                    )
+                    .forEach(
+                        btn => {
 
-        });
-
-
-      catDiv.style.display =
-        catHasVisible
-          ? 'block'
-          : 'none';
-
-
-      if (catHasVisible)
-        anyVisible = true;
-
-    });
+                            const match =
+                                btn.dataset.name
+                                    .includes(q);
 
 
-  noResultsEl.style.display =
-    anyVisible
-      ? 'none'
-      : 'block';
+                            btn.style.display =
+                                match
+                                    ? 'flex'
+                                    : 'none';
+
+
+                            if (match) {
+                                catHasVisible =
+                                    true;
+                            }
+
+                        }
+                    );
+
+
+                catDiv.style.display =
+                    catHasVisible
+                        ? 'block'
+                        : 'none';
+
+
+                if (catHasVisible) {
+                    anyVisible =
+                        true;
+                }
+
+            }
+        );
+
+
+    noResultsEl.style.display =
+        anyVisible
+            ? 'none'
+            : 'block';
 }
 
 
-/* ------------------------------------------------------------------
-   Boutons
-------------------------------------------------------------------- */
+/* ---------------------------------------------------------------
+   Désactivation boutons
+---------------------------------------------------------------- */
 
 function setButtonsDisabled(
-  disabled
+    disabled
 ) {
 
-  document
-    .querySelectorAll(
-      '.station-btn, .stop-btn'
-    )
-    .forEach(
-      b => b.disabled = disabled
+    document
+        .querySelectorAll(
+            '.station-btn, .stop-btn'
+        )
+        .forEach(
+            button => {
+                button.disabled =
+                    disabled;
+            }
+        );
+}
+
+
+/* ---------------------------------------------------------------
+   Lecture
+---------------------------------------------------------------- */
+
+async function playRadio(
+    key
+) {
+
+    setButtonsDisabled(
+        true
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                '/play/' + key,
+                {
+                    method: 'POST'
+                }
+            );
+
+
+        if (!response.ok) {
+
+            console.error(
+                'Erreur HTTP:',
+                response.status
+            );
+
+        }
+
+    } catch (error) {
+
+        console.error(
+            error
+        );
+
+    }
+
+
+    await refreshStatus();
+
+
+    setButtonsDisabled(
+        false
     );
 }
 
 
-/* ------------------------------------------------------------------
-   Play
-------------------------------------------------------------------- */
-
-async function playRadio(key) {
-
-  setButtonsDisabled(true);
-
-  try {
-
-    const response =
-      await fetch(
-        '/play/' + key,
-        {
-          method: 'POST'
-        }
-      );
-
-
-    if (!response.ok) {
-
-      console.error(
-        'Erreur HTTP:',
-        response.status
-      );
-
-    }
-
-  } catch (e) {
-
-    console.error(e);
-
-  }
-
-
-  /*
-   * On actualise immédiatement.
-   * Le serveur va ensuite mettre l'état
-   * à "playing" quand le stream démarre.
-   */
-
-  await refreshStatus();
-
-  setButtonsDisabled(false);
-
-}
-
-
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Stop
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 async function stopRadio() {
 
-  setButtonsDisabled(true);
+    setButtonsDisabled(
+        true
+    );
 
-  try {
 
-    const response =
-      await fetch(
-        '/stop',
-        {
-          method: 'POST'
+    try {
+
+        const response =
+            await fetch(
+                '/stop',
+                {
+                    method: 'POST'
+                }
+            );
+
+
+        if (!response.ok) {
+
+            console.error(
+                'Erreur HTTP:',
+                response.status
+            );
+
         }
-      );
 
+    } catch (error) {
 
-    if (!response.ok) {
-
-      console.error(
-        'Erreur HTTP:',
-        response.status
-      );
+        console.error(
+            error
+        );
 
     }
 
-  } catch (e) {
 
-    console.error(e);
-
-  }
+    await refreshStatus();
 
 
-  await refreshStatus();
-
-  setButtonsDisabled(false);
-
+    setButtonsDisabled(
+        false
+    );
 }
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
    Status
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 async function refreshStatus() {
 
-  try {
+    try {
 
-    const res =
-      await fetch('/status');
-
-    const data =
-      await res.json();
-
-    updateUI(data);
-
-  } catch (e) {
-
-    console.error(e);
-
-  }
-
-}
+        const response =
+            await fetch(
+                '/status'
+            );
 
 
-/* ------------------------------------------------------------------
-   Mise à jour UI
-------------------------------------------------------------------- */
-
-function updateUI(data) {
-
-  const npEl =
-    document.getElementById(
-      'nowPlaying'
-    );
-
-  const dotEl =
-    document.getElementById(
-      'npDot'
-    );
-
-  const iconEl =
-    document.getElementById(
-      'npIcon'
-    );
-
-  const statusTextEl =
-    document.getElementById(
-      'npStatusText'
-    );
-
-  const titleEl =
-    document.getElementById(
-      'npTitle'
-    );
+        const data =
+            await response.json();
 
 
-  npEl.classList.remove(
-    'playing',
-    'error'
-  );
-
-  dotEl.classList.remove(
-    'playing',
-    'connecting',
-    'error'
-  );
-
-
-  document
-    .querySelectorAll(
-      '.station-btn'
-    )
-    .forEach(
-      b => b.classList.remove(
-        'active'
-      )
-    );
-
-
-  const station =
-    data.station
-      ? RADIOS[data.station]
-      : null;
-
-
-  /* --------------------------------------------------------------
-     Playing
-  --------------------------------------------------------------- */
-
-  if (data.status === 'playing') {
-
-    npEl.classList.add(
-      'playing'
-    );
-
-    dotEl.classList.add(
-      'playing'
-    );
-
-    statusTextEl.textContent =
-      'En cours de lecture';
-
-    iconEl.textContent =
-      station
-        ? station.emoji
-        : '🔊';
-
-    titleEl.textContent =
-      station
-        ? station.name
-        : 'Diffusion en cours';
-
-
-    if (station) {
-
-      const b =
-        document.getElementById(
-          'btn-' + data.station
+        updateUI(
+            data
         );
 
-      if (b)
-        b.classList.add(
-          'active'
+    } catch (error) {
+
+        console.error(
+            error
         );
 
     }
-
-  }
-
-
-  /* --------------------------------------------------------------
-     Connecting
-  --------------------------------------------------------------- */
-
-  else if (
-    data.status === 'connecting'
-  ) {
-
-    dotEl.classList.add(
-      'connecting'
-    );
-
-    statusTextEl.textContent =
-      'Connexion...';
-
-    iconEl.textContent =
-      station
-        ? station.emoji
-        : '📡';
-
-    titleEl.textContent =
-      station
-        ? station.name
-        : 'Connexion à la Devialet';
-
-  }
-
-
-  /* --------------------------------------------------------------
-     Error
-  --------------------------------------------------------------- */
-
-  else if (
-    data.status === 'error'
-  ) {
-
-    npEl.classList.add(
-      'error'
-    );
-
-    dotEl.classList.add(
-      'error'
-    );
-
-    statusTextEl.textContent =
-      'Erreur';
-
-    iconEl.textContent =
-      '⚠️';
-
-    titleEl.textContent =
-      data.message ||
-      'Erreur de connexion';
-
-  }
-
-
-  /* --------------------------------------------------------------
-     Stopped
-  --------------------------------------------------------------- */
-
-  else {
-
-    statusTextEl.textContent =
-      'Arrêté';
-
-    iconEl.textContent =
-      '🔇';
-
-    titleEl.textContent =
-      'Aucune diffusion';
-
-  }
-
 }
 
 
-/* ------------------------------------------------------------------
+/* ---------------------------------------------------------------
+   UI
+---------------------------------------------------------------- */
+
+function updateUI(
+    data
+) {
+
+    const nowPlaying =
+        document.getElementById(
+            'nowPlaying'
+        );
+
+    const dot =
+        document.getElementById(
+            'npDot'
+        );
+
+    const icon =
+        document.getElementById(
+            'npIcon'
+        );
+
+    const statusText =
+        document.getElementById(
+            'npStatusText'
+        );
+
+    const title =
+        document.getElementById(
+            'npTitle'
+        );
+
+
+    nowPlaying.classList.remove(
+        'playing',
+        'error'
+    );
+
+
+    dot.classList.remove(
+        'playing',
+        'connecting',
+        'error'
+    );
+
+
+    document
+        .querySelectorAll(
+            '.station-btn'
+        )
+        .forEach(
+            button => {
+                button.classList.remove(
+                    'active'
+                );
+            }
+        );
+
+
+    const station =
+        data.station
+            ? RADIOS[data.station]
+            : null;
+
+
+    /* -----------------------------------------------------------
+       Playing
+    ------------------------------------------------------------ */
+
+    if (
+        data.status ===
+        'playing'
+    ) {
+
+        nowPlaying.classList.add(
+            'playing'
+        );
+
+        dot.classList.add(
+            'playing'
+        );
+
+        statusText.textContent =
+            'En cours de lecture';
+
+        icon.textContent =
+            station
+                ? station.emoji
+                : '🔊';
+
+        title.textContent =
+            station
+                ? station.name
+                : 'Diffusion en cours';
+
+
+        if (station) {
+
+            const button =
+                document.getElementById(
+                    'btn-' +
+                    data.station
+                );
+
+
+            if (button) {
+
+                button.classList.add(
+                    'active'
+                );
+
+            }
+
+        }
+
+        return;
+    }
+
+
+    /* -----------------------------------------------------------
+       Connecting
+    ------------------------------------------------------------ */
+
+    if (
+        data.status ===
+        'connecting'
+    ) {
+
+        dot.classList.add(
+            'connecting'
+        );
+
+        statusText.textContent =
+            'Connexion...';
+
+        icon.textContent =
+            station
+                ? station.emoji
+                : '📡';
+
+        title.textContent =
+            station
+                ? station.name
+                : 'Connexion à la Devialet';
+
+        return;
+    }
+
+
+    /* -----------------------------------------------------------
+       Error
+    ------------------------------------------------------------ */
+
+    if (
+        data.status ===
+        'error'
+    ) {
+
+        nowPlaying.classList.add(
+            'error'
+        );
+
+        dot.classList.add(
+            'error'
+        );
+
+        statusText.textContent =
+            'Erreur';
+
+        icon.textContent =
+            '⚠️';
+
+        title.textContent =
+            data.message ||
+            'Erreur de connexion';
+
+        return;
+    }
+
+
+    /* -----------------------------------------------------------
+       Stopped
+    ------------------------------------------------------------ */
+
+    statusText.textContent =
+        'Arrêté';
+
+    icon.textContent =
+        '🔇';
+
+    title.textContent =
+        'Aucune diffusion';
+}
+
+
+/* ---------------------------------------------------------------
    Initialisation
-------------------------------------------------------------------- */
+---------------------------------------------------------------- */
 
 refreshStatus();
 
 setInterval(
-  refreshStatus,
-  2000
+    refreshStatus,
+    2000
 );
 
 </script>
 
 </body>
+
 </html>
 """
 
 
 # ---------------------------------------------------------------------------
-# Lecture sur la Devialet
+# Lecture d'une URL sur le Devialet
 # ---------------------------------------------------------------------------
 
-async def play_url_on_airplay(url):
+async def play_url_on_airplay(
+    url,
+    generation,
+    station_name,
+):
+    """
+    Lance le flux sur le Devialet.
+
+    IMPORTANT :
+    stream_file() reste actif pendant toute la durée
+    de la radio.
+
+    On met donc l'état à "playing" AVANT de faire
+    await stream_file().
+    """
+
+    atv = None
 
     try:
 
         print(
-            f"Recherche de l'appareil à l'IP "
-            f"{DEVIALET_IP}..."
+            f"[{station_name}] "
+            f"Recherche du Devialet "
+            f"à {DEVIALET_IP}..."
         )
 
 
-        loop = asyncio.get_running_loop()
+        loop =
+            asyncio.get_running_loop()
 
 
         atvs = await pyatv.scan(
@@ -1224,24 +1476,19 @@ async def play_url_on_airplay(url):
 
         if not atvs:
 
-            print(
-                "Aucun appareil trouvé à cette adresse."
+            raise RuntimeError(
+                "Appareil introuvable"
             )
 
-            set_state(
-                "error",
-                message="Appareil introuvable"
-            )
 
-            return
-
-
-        conf = atvs[0]
+        conf =
+            atvs[0]
 
 
         print(
+            f"[{station_name}] "
             f"Appareil trouvé : "
-            f"{conf.name}. Connexion..."
+            f"{conf.name}"
         )
 
 
@@ -1252,43 +1499,112 @@ async def play_url_on_airplay(url):
 
 
         print(
-            "Connecté ! "
-            "Envoi de l'URL via RAOP "
-            "(stream_file)..."
+            f"[{station_name}] "
+            f"Connecté !"
         )
-
-
-        # stream_file reste actif pendant la diffusion.
-        # Cette fonction est donc exécutée dans un thread
-        # séparé afin de ne pas bloquer Flask.
-
-        await atv.stream.stream_file(url)
 
 
         print(
-            "Flux terminé."
+            f"[{station_name}] "
+            f"Envoi du flux via RAOP..."
         )
 
 
-        atv.close()
+        # ---------------------------------------------------------
+        # IMPORTANT
+        #
+        # On considère la station comme "playing"
+        # dès que la connexion au Devialet est établie
+        # et que le stream va être lancé.
+        #
+        # On ne doit surtout PAS attendre la fin de
+        # stream_file(), puisque celle-ci peut durer
+        # plusieurs heures.
+        # ---------------------------------------------------------
+
+        if generation == get_generation():
+
+            set_state(
+                "playing",
+                station=station_name
+            )
+
+            print(
+                f"[{station_name}] "
+                f"État UI -> PLAYING"
+            )
+
+
+        # ---------------------------------------------------------
+        # Cette fonction reste volontairement bloquée ici
+        # pendant toute la durée du stream.
+        # Elle tourne dans un thread séparé.
+        # ---------------------------------------------------------
+
+        await atv.stream.stream_file(
+            url
+        )
+
+
+        print(
+            f"[{station_name}] "
+            f"Flux terminé."
+        )
 
 
     except Exception as e:
 
         print(
+            f"[{station_name}] "
             f"Erreur AirPlay : {e}"
         )
 
-        set_state(
-            "error",
-            message=str(e)
-        )
+
+        # ---------------------------------------------------------
+        # Très important :
+        #
+        # Si cette erreur provient d'une ancienne station,
+        # on NE DOIT PAS afficher "Erreur" dans l'interface.
+        #
+        # Exemple :
+        #
+        # France Inter
+        #      ↓
+        # changement vers Skyrock
+        #      ↓
+        # ancien stream France Inter se ferme
+        #      ↓
+        # "not connected to remote"
+        #
+        # Cette erreur est normale pour l'ancien stream.
+        # ---------------------------------------------------------
+
+        if generation == get_generation():
+
+            set_state(
+                "error",
+                station=station_name,
+                message=str(e)
+            )
 
         raise
 
 
+    finally:
+
+        if atv is not None:
+
+            try:
+
+                atv.close()
+
+            except Exception:
+
+                pass
+
+
 # ---------------------------------------------------------------------------
-# Arrêt
+# Arrêt du Devialet
 # ---------------------------------------------------------------------------
 
 async def stop_airplay():
@@ -1296,11 +1612,12 @@ async def stop_airplay():
     try:
 
         print(
-            "Recherche de l'appareil pour l'arrêt..."
+            "Recherche du Devialet pour l'arrêt..."
         )
 
 
-        loop = asyncio.get_running_loop()
+        loop =
+            asyncio.get_running_loop()
 
 
         atvs = await pyatv.scan(
@@ -1312,24 +1629,21 @@ async def stop_airplay():
         if not atvs:
 
             print(
-                "Aucun appareil trouvé à cette adresse."
-            )
-
-            set_state(
-                "error",
-                message="Appareil introuvable"
+                "Aucun appareil trouvé."
             )
 
             return
 
 
-        conf = atvs[0]
+        conf =
+            atvs[0]
 
 
-        atv = await pyatv.connect(
-            conf,
-            loop=loop
-        )
+        atv =
+            await pyatv.connect(
+                conf,
+                loop=loop
+            )
 
 
         try:
@@ -1337,7 +1651,8 @@ async def stop_airplay():
             await atv.remote_control.stop()
 
             print(
-                "Lecture arrêtée via remote_control."
+                "Lecture arrêtée via "
+                "remote_control."
             )
 
 
@@ -1348,17 +1663,19 @@ async def stop_airplay():
 
             print(
                 "remote_control.stop() "
-                f"non supporté ({e}), "
-                "fermeture de la connexion."
+                f"non supporté : {e}"
             )
 
 
-        atv.close()
+        finally:
 
+            try:
 
-        print(
-            "Connexion fermée."
-        )
+                atv.close()
+
+            except Exception:
+
+                pass
 
 
     except Exception as e:
@@ -1367,51 +1684,64 @@ async def stop_airplay():
             f"Erreur lors de l'arrêt : {e}"
         )
 
-        set_state(
-            "error",
-            message=str(e)
-        )
-
         raise
 
 
 # ---------------------------------------------------------------------------
-# Routes Flask
+# Page principale
 # ---------------------------------------------------------------------------
 
 @app.route("/")
 def index():
 
     radios_for_js = {
-        k: {
-            "name": v["name"],
-            "emoji": v["emoji"],
-            "category": v["category"],
+
+        key: {
+
+            "name":
+                radio["name"],
+
+            "emoji":
+                radio["emoji"],
+
+            "category":
+                radio["category"],
+
         }
-        for k, v in RADIOS.items()
+
+        for key, radio
+        in RADIOS.items()
     }
 
 
-    page = HTML_PAGE.replace(
-        "__RADIOS_JSON__",
-        json.dumps(
-            radios_for_js,
-            ensure_ascii=False
+    page =
+        HTML_PAGE.replace(
+            "__RADIOS_JSON__",
+            json.dumps(
+                radios_for_js,
+                ensure_ascii=False
+            )
         )
+
+
+    page =
+        page.replace(
+            "__CATEGORIES_JSON__",
+            json.dumps(
+                CATEGORIES,
+                ensure_ascii=False
+            )
+        )
+
+
+    return render_template_string(
+        page
     )
 
 
-    page = page.replace(
-        "__CATEGORIES_JSON__",
-        json.dumps(
-            CATEGORIES,
-            ensure_ascii=False
-        )
-    )
-
-
-    return render_template_string(page)
-
+# ---------------------------------------------------------------------------
+# API status
+# ---------------------------------------------------------------------------
 
 @app.route("/status")
 def status():
@@ -1424,105 +1754,109 @@ def status():
 
 
 # ---------------------------------------------------------------------------
-# Play
-#
-# IMPORTANT :
-# On lance pyatv dans un thread séparé.
-# Flask répond immédiatement au téléphone.
+# API play
 # ---------------------------------------------------------------------------
 
 @app.route(
     "/play/<radio_name>",
     methods=["POST"]
 )
-def play_radio(radio_name):
+def play_radio(
+    radio_name
+):
 
     if radio_name not in RADIOS:
 
-        return (
-            "Radio inconnue",
-            400
-        )
+        return jsonify({
+            "success": False,
+            "error": "Radio inconnue",
+        }), 400
 
 
     url = RADIOS[radio_name]["url"]
 
 
     print(
-        f"Demande de lecture reçue pour : "
-        f"{radio_name}"
+        f"Demande de lecture reçue "
+        f"pour : {radio_name}"
     )
 
 
-    # Dès maintenant l'interface affiche
-    # "Connexion..."
+    # ---------------------------------------------------------------
+    # Nouvelle génération.
+    #
+    # Tout ancien stream devient automatiquement obsolète.
+    # ---------------------------------------------------------------
+
+    generation =
+        get_new_generation()
+
+
+    # ---------------------------------------------------------------
+    # On affiche immédiatement "Connexion..."
+    # ---------------------------------------------------------------
+
     set_state(
         "connecting",
         station=radio_name
     )
 
 
+    # ---------------------------------------------------------------
+    # Thread de lecture
+    # ---------------------------------------------------------------
+
     def background_play():
 
         try:
 
             asyncio.run(
-                play_url_on_airplay(url)
-            )
-
-
-            # IMPORTANT :
-            # Quand pyatv a effectivement lancé
-            # le stream, on indique à l'interface
-            # que la station est en lecture.
-
-            set_state(
-                "playing",
-                station=radio_name
-            )
-
-
-            print(
-                f"Lecture active : "
-                f"{radio_name}"
+                play_url_on_airplay(
+                    url,
+                    generation,
+                    radio_name
+                )
             )
 
 
         except Exception as e:
 
             print(
-                f"Erreur pendant la lecture : "
+                f"[{radio_name}] "
+                f"Thread terminé avec erreur : "
                 f"{e}"
             )
 
 
-            set_state(
-                "error",
-                station=radio_name,
-                message=str(e)
-            )
-
-
-    # Exécution en arrière-plan
-    thread = threading.Thread(
-        target=background_play,
-        daemon=True
-    )
+    thread =
+        threading.Thread(
+            target=background_play,
+            daemon=True
+        )
 
 
     thread.start()
 
 
-    # Réponse immédiate au navigateur
+    # ---------------------------------------------------------------
+    # Réponse immédiate au navigateur.
+    # ---------------------------------------------------------------
+
     return jsonify({
+
         "success": True,
-        "status": "connecting",
-        "station": radio_name,
+
+        "status":
+            "connecting",
+
+        "station":
+            radio_name,
+
     }), 202
 
 
 # ---------------------------------------------------------------------------
-# Stop
+# API stop
 # ---------------------------------------------------------------------------
 
 @app.route(
@@ -1536,6 +1870,13 @@ def stop_audio():
     )
 
 
+    # ---------------------------------------------------------------
+    # Invalide immédiatement tous les anciens threads.
+    # ---------------------------------------------------------------
+
+    get_new_generation()
+
+
     try:
 
         asyncio.run(
@@ -1543,12 +1884,28 @@ def stop_audio():
         )
 
 
-    except Exception:
+    except Exception as e:
 
-        return (
-            "Erreur lors de l'arrêt",
-            500
+        print(
+            f"Erreur lors de l'arrêt : {e}"
         )
+
+
+        set_state(
+            "error",
+            message=str(e)
+        )
+
+
+        return jsonify({
+
+            "success":
+                False,
+
+            "error":
+                str(e),
+
+        }), 500
 
 
     set_state(
@@ -1556,10 +1913,15 @@ def stop_audio():
     )
 
 
-    return (
-        "Audio arrêté",
-        200
-    )
+    return jsonify({
+
+        "success":
+            True,
+
+        "status":
+            "stopped",
+
+    }), 200
 
 
 # ---------------------------------------------------------------------------
