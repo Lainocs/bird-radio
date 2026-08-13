@@ -50,8 +50,8 @@ async def play_url_on_airplay(url):
         print(f"Appareil trouvé : {conf.name}. Connexion...")
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
 
-        print("Connecté ! Lancement du flux audio...")
-        await atv.audio.stream_file(url)
+        print("Connecté ! Envoi de l'URL via AirPlay...")
+        await atv.airplay.play_url(url)
         print("Flux audio démarré.")
         await atv.close()
     except Exception as e:
@@ -67,7 +67,7 @@ async def stop_airplay():
 
         conf = atvs[0]
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
-        await atv.remote_control.stop()
+        await atv.airplay.stop()
         print("Lecture arrêtée.")
         await atv.close()
     except Exception as e:
