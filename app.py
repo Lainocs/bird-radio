@@ -50,10 +50,12 @@ async def play_url_on_airplay(url):
         conf = atvs[0]
         print(f"Appareil trouvé : {conf.name}. Connexion...")
         atv = await pyatv.connect(conf, loop=asyncio.get_running_loop())
-        print("Connecté ! Envoi de l'URL via le service de streaming AirPlay...")
-        # Le streaming d'URL se fait via atv.stream, pas atv.audio
-        # (FacadeAudio ne gère que le volume, pas la lecture)
-        await atv.stream.play_url(url)
+        print("Connecté ! Envoi de l'URL via RAOP (stream_file)...")
+        # Cet appareil expose RAOP mais pas la feature PlayUrl (nécessite un
+        # pairing AirPlay complet). StreamFile fonctionne en revanche sans
+        # pairing : pyatv utilise ffmpeg pour transcoder/streamer le flux.
+        # stream_file accepte aussi bien un chemin local qu'une URL http(s).
+        await atv.stream.stream_file(url)
         print("Flux envoyé.")
         await atv.close()
     except Exception as e:
