@@ -1464,8 +1464,7 @@ async def play_url_on_airplay(
         )
 
 
-        loop =
-            asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
 
 
         atvs = await pyatv.scan(
