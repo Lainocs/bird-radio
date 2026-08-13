@@ -679,7 +679,7 @@ async def play_url_on_airplay(url, generation, station_name):
         print(f"[{station_name}] État -> PLAYING")
 
         # Ajustement du volume en différé (2,5 secondes après le début du stream)
-        asyncio.create_task(set_volume_after_start(atv, 45.0, delay=2.5))
+        asyncio.create_task(set_volume_after_start(atv, 55.0, delay=2.5))
 
         await atv.stream.stream_file(url)
         print(f"[{station_name}] Flux terminé.")
