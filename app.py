@@ -39,17 +39,25 @@ HTML_PAGE = """
 """
 
 async def play_url_on_airplay(url):
-    atv = await pyatv.connect_to_airplay(DEVIALET_IP, loop=asyncio.get_running_loop())
-    await atv.audio.play_url(url)
-    await atv.close()
+    try:
+        print(f"Tentative de connexion à {DEVIALET_IP}...")
+        atv = await pyatv.connect_to_airplay(DEVIALET_IP, loop=asyncio.get_running_loop())
+        print("Connecté ! Envoi de l'URL...")
+        await atv.audio.play_url(url)
+        print("URL envoyée.")
+        await atv.close()
+    except Exception as e:
+        print(f"Erreur AirPlay : {e}")
 
 async def stop_airplay():
     try:
+        print("Tentative d'arrêt de la lecture...")
         atv = await pyatv.connect_to_airplay(DEVIALET_IP, loop=asyncio.get_running_loop())
         await atv.remote_control.stop()
+        print("Lecture arrêtée.")
         await atv.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Erreur lors de l'arrêt : {e}")
 
 @app.route("/")
 def index():
@@ -59,12 +67,14 @@ def index():
 def play_radio(radio_name):
     if radio_name in RADIOS:
         url = RADIOS[radio_name]
+        print(f"Demande de lecture reçue pour : {radio_name}")
         asyncio.run(play_url_on_airplay(url))
         return f"Lecture de {radio_name} sur la Devialet", 200
     return "Radio inconnue", 400
 
 @app.route("/stop", methods=["POST"])
 def stop_audio():
+    print("Demande d'arrêt reçue")
     asyncio.run(stop_airplay())
     return "Audio arrêté", 200
 
